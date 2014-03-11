@@ -19,6 +19,10 @@
 #
 
 include_recipe "mongodb::10gen_repo"
+mongodb_instance "mongodb" do
+  port node['errbit']['db']['port']
+  host node['errbit']['db']['host']
+end
 
 node.set['build_essential']['compiletime'] = true
 include_recipe "build-essential"
@@ -40,25 +44,12 @@ end
 
 # Exporting the SECRET_TOKEN env var
 secret_token = rand(8**256).to_s(36).ljust(8,'a')[0..150]
-# execute "set SECRET_TOKEN var" do
-#   command "echo 'export SECRET_TOKEN=#{secret_token}' >> ~/.bash_profile"
-#   not_if "grep SECRET_TOKEN ~/.bash_profile"
-# end
+
 file "/etc/profile.d/errbit_env.sh" do
   mode "0644"
   action :create_if_missing
   content "export SECRET_TOKEN=#{secret_token}\nexport RAILS_ENV=production\nexport RACK_ENV=production\n"
 end
-
-# execute "set RAILS_ENV var" do
-#   command "echo 'export RAILS_ENV=production' >> ~/.bash_profile"
-#   not_if "grep RAILS_ENV ~/.bash_profile"
-# end
-
-# execute "set RACK_ENV var" do
-#   command "echo 'export RACK_ENV=production' >> ~/.bash_profile"
-#   not_if "grep RACK_ENV ~/.bash_profile"
-# end
 
 execute "update sources list" do
   command "apt-get update"
@@ -102,20 +93,36 @@ template "#{node['errbit']['deploy_to']}/shared/config/config.yml" do
   group node['errbit']['group']
   mode 00644
   variables(params: {
-    host: node['errbit']['config']['host'] || node['fqdn'],
+    host: node['errbit']['config']['host'],
+    port: node['errbit']['config']['port'],
+    https: node['errbit']['config']['https'],
     enforce_ssl: node['errbit']['config']['enforce_ssl'],
     email_from: node['errbit']['config']['email_from'] || "errbit@#{node['fqdn']}",
     per_app_email_at_notices: node['errbit']['config']['per_app_email_at_notices'],
     email_at_notices: node['errbit']['config']['email_at_notices'],
-    confirm_resolve_err: node['errbit']['config']['confirm_resolve_err'],
+    per_app_notify_at_notices: node['errbit']['config']['per_app_notify_at_notices'],
+    notify_at_notices: node['errbit']['config']['notify_at_notices'],
+    confirm_err_actions: node['errbit']['config']['confirm_err_actions'],
     user_has_username: node['errbit']['config']['user_has_username'],
     allow_comments_with_issue_tracker: node['errbit']['config']['allow_comments_with_issue_tracker'],
+    display_internal_errors: node['errbit']['config']['display_internal_errors'],
     use_gravatar: node['errbit']['config']['use_gravatar'],
     gravatar_default: node['errbit']['config']['gravatar_default'],
     github_authentication: node['errbit']['config']['github_authentication'],
     github_client_id: node['errbit']['config']['github_client_id'],
     github_secret: node['errbit']['config']['github_secret'],
     github_access_scope: node['errbit']['config']['github_access_scope']
+  })
+end
+
+# errbit secret_token
+template "#{node['errbit']['deploy_to']}/shared/config/secret_token.rb" do
+  source "secret_token.rb.erb"
+  owner node['errbit']['user']
+  group node['errbit']['group']
+  mode 00644
+  variables(params: {
+    secret_token: secret_token
   })
 end
 
@@ -128,9 +135,11 @@ template "#{node['errbit']['deploy_to']}/shared/config/mongoid.yml" do
     environment: node['errbit']['environment'],
     host: node['errbit']['db']['host'],
     port: node['errbit']['db']['port'],
-    database: node['errbit']['db']['database']
-    # username: node['errbit']['db']['username'],
-    # password: node['errbit']['db']['password']
+    database: node['errbit']['db']['database'],
+    username: node['errbit']['db']['username'],
+    password: node['errbit']['db']['password'],
+    identity_map_enabled: node['errbit']['db']['identity_map_enabled'],
+    use_utc: node['errbit']['db']['use_utc']
   })
 end
 
@@ -142,9 +151,9 @@ deploy_revision node['errbit']['deploy_to'] do
   enable_submodules false
   migrate false
   before_migrate do
-    link "#{release_path}/vendor/bundle" do
-      to "#{node['errbit']['deploy_to']}/shared/vendor_bundle"
-    end
+    # link "#{release_path}/vendor/bundle" do
+    #   to "#{node['errbit']['deploy_to']}/shared/vendor_bundle"
+    # end
     common_groups = %w{development test cucumber staging production}
     execute "bundle install --deployment --without #{(common_groups - ([node['errbit']['environment']])).join(' ')}" do
       ignore_failure true
@@ -154,10 +163,11 @@ deploy_revision node['errbit']['deploy_to'] do
 
   symlink_before_migrate nil
   symlinks(
+    "config/secret_token.rb" => "config/initializers/__secret_token.rb",
     "config/config.yml" => "config/config.yml",
     "config/mongoid.yml" => "config/mongoid.yml"
   )
-  environment 'RAILS_ENV' => node['errbit']['environment'], 'SECRET_TOKEN' => node['errbit']['secret_token']
+  environment 'RAILS_ENV' => node['errbit']['environment'], 'SECRET_TOKEN' => secret_token
   shallow_clone true
   action :deploy #:deploy or :rollback or :force_deploy
 
