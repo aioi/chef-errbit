@@ -3,7 +3,7 @@
 Chef::Log.info "-" * 70
 Chef::Log.info "Checking to bootstrap the admin user"
 execute "check whether to bootstrap admin user" do
-  command "bundle exec rake db:seed -t"
+  command "bundle exec rake errbit:bootstrap -t"
   cwd "#{node['errbit']['deploy_to']}/current"
   environment ({'RAILS_ENV' => 'production'})
   # not_if "bundle exec rails runner 'p User.where(admin: true).first'"
