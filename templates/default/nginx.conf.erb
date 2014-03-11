@@ -1,7 +1,8 @@
-
+<% unless node['errbit']['server'] == 'passenger' %>
 upstream <%= node['errbit']['name'] %> {
   server unix:<%= node['errbit']['deploy_to'] %>/shared/sockets/unicorn.sock fail_timeout=0;
 }
+<% end %>
 
 # Rewrite www to non-www
 # server{
@@ -19,6 +20,14 @@ server {
 
   access_log  <%= node['errbit']['deploy_to'] %>/shared/log/access.log combined;
   error_log   <%= node['errbit']['deploy_to'] %>/shared/log/error.log;
+
+<% if node['errbit']['server'] == 'passenger' %>
+  # Enable passenger
+  passenger_enabled on;
+
+  # Passenger options
+  rack_env <%= node['errbit']['environment'] %>;
+<% end %>
 
   location ^~ /assets/ {
     gzip_static on;
@@ -41,6 +50,7 @@ server {
 #     }
 #   }
 
+<% unless node['errbit']['server'] == 'passenger' %>
   try_files $uri/index.html $uri @unicorn;
   location @unicorn {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -48,6 +58,7 @@ server {
     proxy_redirect off;
     proxy_pass http://<%= node['errbit']['name'] %>;
   }
+<% end %>
 
   error_page  500 502 503 504 /500.html;
   error_page  404 /404.html;
